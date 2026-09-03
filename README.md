@@ -35,3 +35,4 @@ The cron job in vercel.json also pings the API at midnight (00:00 UTC) to warm t
 - `dealstage` — Stage
 - `hubspot_owner_id` — Deal owner (matched to SM)
 - `closedate` — Close date
+
