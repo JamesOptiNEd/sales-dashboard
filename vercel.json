@@ -1,11 +1,4 @@
 {
-  "crons": [
-    {
-      "path": "/api/deals",
-      "schedule": "0 0 * * *"
-    }
-  ],
-  "env": {
-    "HUBSPOT_TOKEN": "@hubspot_token"
-  }
+  "buildCommand": "next build",
+  "outputDirectory": ".next"
 }
