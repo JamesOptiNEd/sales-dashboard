@@ -1,19 +1,22 @@
-// pages/api/social.js — shared reactions & comments for the Closed tab's
+// api/social.js — shared reactions & comments for the Closed tab's
 // social feed (deal posts + the weekly champion post).
 //
-// Uses Vercel's native Redis integration (Storage tab -> Redis -> Connect),
-// NOT the old "Vercel KV" product, which Vercel discontinued in Dec 2024.
-// The standard `redis` package stores strings only (no auto-serialization
-// like the old @vercel/kv client had), so values are JSON.stringify'd going
-// in and JSON.parse'd coming out.
+// Name is resolved from the verified session (see auth.js), never taken
+// from the client directly — this is what makes reactions/comments
+// trustworthy rather than self-declared free text.
 //
-// NOTE: name is taken directly from the client ("Posting as" field) — the
-// login/session-verified version was rolled back for now. This means the
-// name shown next to a reaction/comment is self-declared, not verified.
+// Uses Vercel's native Redis integration (Storage tab -> Redis -> Connect).
 
 import { getRedisClient } from '../lib/redis';
 
 const VALID_EMOJIS = new Set(['thumbsup', 'muscle', 'hundred', 'heart']);
+
+async function resolveName(redis, token) {
+  if (!token) return null;
+  const raw = await redis.get(`session:${token}`);
+  if (!raw) return null;
+  try { return JSON.parse(raw).name || null; } catch { return null; }
+}
 
 export default async function handler(req, res) {
   try {
@@ -33,10 +36,13 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { postId, action, emoji, name, text } = req.body || {};
+      const { postId, action, emoji, token, text } = req.body || {};
       if (!postId || typeof postId !== 'string') {
         return res.status(400).json({ error: 'postId is required' });
       }
+
+      const name = await resolveName(redis, token);
+      if (!name) return res.status(401).json({ error: 'Not logged in' });
 
       const key = `social:${postId}`;
       const raw = await redis.get(key);
@@ -44,19 +50,13 @@ export default async function handler(req, res) {
 
       if (action === 'react') {
         if (!VALID_EMOJIS.has(emoji)) return res.status(400).json({ error: 'invalid emoji' });
-        if (!name || !String(name).trim()) return res.status(400).json({ error: 'name is required to react' });
-        const cleanName = String(name).trim().slice(0, 40);
         const list = Array.isArray(current.reactions[emoji]) ? current.reactions[emoji] : [];
-        current.reactions[emoji] = list.includes(cleanName)
-          ? list.filter(n => n !== cleanName)
-          : [...list, cleanName];
+        current.reactions[emoji] = list.includes(name)
+          ? list.filter(n => n !== name)
+          : [...list, name];
       } else if (action === 'comment') {
         if (!text || !String(text).trim()) return res.status(400).json({ error: 'text is required' });
-        current.comments.push({
-          name: String(name || 'Someone').slice(0, 40),
-          text: String(text).slice(0, 500),
-          ts: Date.now(),
-        });
+        current.comments.push({ name, text: String(text).slice(0, 500), ts: Date.now() });
       } else {
         return res.status(400).json({ error: 'action must be "react" or "comment"' });
       }
